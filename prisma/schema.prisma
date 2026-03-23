@@ -1,0 +1,194 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model abonado_vehiculos {
+  id           Int       @id @default(autoincrement())
+  abonado_id   Int
+  vehiculo_id  Int
+  fecha_inicio DateTime  @default(dbgenerated("CURRENT_DATE")) @db.Date
+  fecha_fin    DateTime  @db.Date
+  activo       Boolean   @default(true)
+  created_at   DateTime  @default(now()) @db.Timestamp(6)
+  abonados     abonados  @relation(fields: [abonado_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  vehiculos    vehiculos @relation(fields: [vehiculo_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([abonado_id, vehiculo_id])
+  @@index([vehiculo_id, activo], map: "idx_abonado_veh_vehiculo")
+}
+
+model abonados {
+  id                Int                 @id @default(autoincrement())
+  nombre            String              @db.VarChar(100)
+  identificacion    String              @unique @db.VarChar(20)
+  telefono          String              @db.VarChar(15)
+  email             String?             @db.VarChar(100)
+  estado            estado_abonado      @default(activo)
+  created_at        DateTime            @default(now()) @db.Timestamp(6)
+  updated_at        DateTime            @default(now()) @db.Timestamp(6)
+  abonado_vehiculos abonado_vehiculos[]
+
+  @@index([estado], map: "idx_abonados_estado")
+}
+
+model cierres_caja {
+  id             Int      @id @default(autoincrement())
+  operador_id    String   @db.Uuid
+  fecha          DateTime @default(now()) @db.Timestamp(6)
+  total_efectivo Decimal  @default(0) @db.Decimal(10, 2)
+  total_tarjeta  Decimal  @default(0) @db.Decimal(10, 2)
+  total_digital  Decimal  @default(0) @db.Decimal(10, 2)
+  efectivo_real  Decimal  @default(0) @db.Decimal(10, 2)
+  diferencia     Decimal  @default(0) @db.Decimal(10, 2)
+  observaciones  String?
+  created_at     DateTime @default(now()) @db.Timestamp(6)
+  usuarios       usuarios @relation(fields: [operador_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model espacios {
+  id            Int            @id @default(autoincrement())
+  numero        String         @unique @db.VarChar(10)
+  tipo_vehiculo tipo_vehiculo
+  estado        estado_espacio @default(libre)
+  zona          String         @default("General") @db.VarChar(20)
+  registros     registros[]
+
+  @@index([estado, tipo_vehiculo], map: "idx_espacios_estado_tipo")
+}
+
+model log_auditoria {
+  id         Int      @id @default(autoincrement())
+  usuario_id String   @db.Uuid
+  accion     String   @db.VarChar(100)
+  detalle    String
+  ip         String?  @db.VarChar(45)
+  created_at DateTime @default(now()) @db.Timestamp(6)
+  usuarios   usuarios @relation(fields: [usuario_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([created_at], map: "idx_log_fecha")
+}
+
+model pagos {
+  id          Int         @id @default(autoincrement())
+  registro_id Int
+  tarifa_id   Int
+  monto       Decimal     @db.Decimal(10, 2)
+  metodo_pago metodo_pago
+  referencia  String?     @db.VarChar(50)
+  descuento   Decimal     @default(0) @db.Decimal(5, 2)
+  operador_id String      @db.Uuid
+  created_at  DateTime    @default(now()) @db.Timestamp(6)
+  usuarios    usuarios    @relation(fields: [operador_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  registros   registros   @relation(fields: [registro_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  tarifas     tarifas     @relation(fields: [tarifa_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([created_at], map: "idx_pagos_fecha")
+}
+
+model registros {
+  id                                               Int             @id @default(autoincrement())
+  vehiculo_id                                      Int
+  espacio_id                                       Int
+  tiquete_codigo                                   String          @unique @db.VarChar(20)
+  fecha_entrada                                    DateTime        @default(now()) @db.Timestamp(6)
+  fecha_salida                                     DateTime?       @db.Timestamp(6)
+  estado                                           estado_registro @default(activo)
+  operador_entrada_id                              String          @db.Uuid
+  operador_salida_id                               String?         @db.Uuid
+  created_at                                       DateTime        @default(now()) @db.Timestamp(6)
+  pagos                                            pagos[]
+  espacios                                         espacios        @relation(fields: [espacio_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  usuarios_registros_operador_entrada_idTousuarios usuarios        @relation("registros_operador_entrada_idTousuarios", fields: [operador_entrada_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  usuarios_registros_operador_salida_idTousuarios  usuarios?       @relation("registros_operador_salida_idTousuarios", fields: [operador_salida_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  vehiculos                                        vehiculos       @relation(fields: [vehiculo_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([estado], map: "idx_registros_estado")
+  @@index([tiquete_codigo], map: "idx_registros_tiquete")
+}
+
+model tarifas {
+  id             Int           @id @default(autoincrement())
+  tipo_vehiculo  tipo_vehiculo
+  tipo_tarifa    tipo_tarifa
+  valor          Decimal       @db.Decimal(10, 2)
+  vigencia_desde DateTime      @default(dbgenerated("CURRENT_DATE")) @db.Date
+  vigencia_hasta DateTime?     @db.Date
+  activa         Boolean       @default(true)
+  created_at     DateTime      @default(now()) @db.Timestamp(6)
+  pagos          pagos[]
+}
+
+model usuarios {
+  id                                                String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  nombre                                            String          @db.VarChar(100)
+  email                                             String          @unique @db.VarChar(100)
+  password_hash                                     String          @db.VarChar(255)
+  rol                                               rol_usuario     @default(operador)
+  activo                                            Boolean         @default(true)
+  ultimo_acceso                                     DateTime?       @db.Timestamp(6)
+  created_at                                        DateTime        @default(now()) @db.Timestamp(6)
+  updated_at                                        DateTime        @default(now()) @db.Timestamp(6)
+  cierres_caja                                      cierres_caja[]
+  log_auditoria                                     log_auditoria[]
+  pagos                                             pagos[]
+  registros_registros_operador_entrada_idTousuarios registros[]     @relation("registros_operador_entrada_idTousuarios")
+  registros_registros_operador_salida_idTousuarios  registros[]     @relation("registros_operador_salida_idTousuarios")
+}
+
+model vehiculos {
+  id                Int                 @id @default(autoincrement())
+  placa             String              @unique @db.VarChar(10)
+  tipo              tipo_vehiculo
+  observaciones     String?
+  created_at        DateTime            @default(now()) @db.Timestamp(6)
+  abonado_vehiculos abonado_vehiculos[]
+  registros         registros[]
+
+  @@index([placa], map: "idx_vehiculos_placa")
+}
+
+enum estado_abonado {
+  activo
+  vencido
+  cancelado
+}
+
+enum estado_espacio {
+  libre
+  ocupado
+}
+
+enum estado_registro {
+  activo
+  cerrado
+}
+
+enum metodo_pago {
+  efectivo
+  tarjeta
+  nequi
+  daviplata
+}
+
+enum rol_usuario {
+  admin
+  operador
+  contador
+}
+
+enum tipo_tarifa {
+  fraccion
+  plena
+  mensual
+}
+
+enum tipo_vehiculo {
+  carro
+  moto
+  bicicleta
+}
