@@ -91,5 +91,48 @@ router.get('/me', authMiddleware, async (req, res) => {
     res.status(500).json({ ok: false, message: 'Error del servidor' });
   }
 });
+router.get('/usuarios', authMiddleware, async (req, res) => {
+  try {
+    if (req.usuario.rol !== 'admin') {
+      return res.status(403).json({ ok: false, message: 'No tienes permisos para ver usuarios' });
+    }
+
+    const usuarios = await prisma.usuarios.findMany({
+      select: { id: true, nombre: true, email: true, rol: true, activo: true, ultimo_acceso: true, created_at: true },
+      orderBy: { created_at: 'asc' }
+    });
+
+    res.json({ ok: true, data: usuarios });
+  } catch (error) {
+    console.error('Error:', error);
+    res.status(500).json({ ok: false, message: 'Error del servidor' });
+  }
+});
+
+// PUT /api/auth/usuarios/:id - Actualizar rol o estado (solo admin)
+router.put('/usuarios/:id', authMiddleware, async (req, res) => {
+  try {
+    if (req.usuario.rol !== 'admin') {
+      return res.status(403).json({ ok: false, message: 'No tienes permisos' });
+    }
+
+    const { id } = req.params;
+    const { rol, activo } = req.body;
+
+    const data = {};
+    if (rol) data.rol = rol;
+    if (activo !== undefined) data.activo = activo;
+
+    const usuario = await prisma.usuarios.update({
+      where: { id: parseInt(id) },
+      select: { id: true, nombre: true, email: true, rol: true, activo: true }
+    , data });
+
+    res.json({ ok: true, usuario });
+  } catch (error) {
+    console.error('Error:', error);
+    res.status(500).json({ ok: false, message: 'Error del servidor' });
+  }
+});
 
 module.exports = router;
