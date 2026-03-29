@@ -11,7 +11,6 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ ok: false, message: 'registro_id, monto, metodo_pago y operador_id son requeridos' });
     }
 
-    // Verificar que el registro existe y esta activo
     const registro = await prisma.registros.findFirst({
       where: { id: registro_id, estado: 'activo' },
       include: { vehiculos: true, espacios: true }
@@ -21,7 +20,6 @@ router.post('/', async (req, res) => {
       return res.status(404).json({ ok: false, message: 'Registro no encontrado o ya procesado' });
     }
 
-    // Procesar pago, cerrar registro y liberar espacio en transaccion
     const [pago] = await prisma.$transaction([
       prisma.pagos.create({
         data: {
@@ -87,6 +85,67 @@ router.get('/hoy', async (req, res) => {
         total_digital: totalDigital,
         total_general: totalEfectivo + totalTarjeta + totalDigital
       },
+      data: pagos
+    });
+  } catch (error) {
+    console.error('Error:', error);
+    res.status(500).json({ ok: false, message: 'Error del servidor' });
+  }
+});
+
+// GET /api/pagos/fecha?desde=2026-03-01&hasta=2026-03-31 - Pagos por rango de fechas
+router.get('/fecha', async (req, res) => {
+  try {
+    const { desde, hasta } = req.query;
+
+    if (!desde || !hasta) {
+      return res.status(400).json({ ok: false, message: 'Los parametros desde y hasta son requeridos' });
+    }
+
+    const fechaDesde = new Date(desde);
+    fechaDesde.setHours(0, 0, 0, 0);
+    const fechaHasta = new Date(hasta);
+    fechaHasta.setHours(23, 59, 59, 999);
+
+    const pagos = await prisma.pagos.findMany({
+      where: {
+        created_at: { gte: fechaDesde, lte: fechaHasta }
+      },
+      include: { registros: { include: { vehiculos: true } } },
+      orderBy: { created_at: 'desc' }
+    });
+
+    const totalEfectivo = pagos.filter(p => p.metodo_pago === 'efectivo').reduce((sum, p) => sum + Number(p.monto), 0);
+    const totalTarjeta = pagos.filter(p => p.metodo_pago === 'tarjeta').reduce((sum, p) => sum + Number(p.monto), 0);
+    const totalDigital = pagos.filter(p => ['nequi', 'daviplata'].includes(p.metodo_pago)).reduce((sum, p) => sum + Number(p.monto), 0);
+
+    // Agrupar por dia
+    const porDia = {};
+    pagos.forEach(p => {
+      const dia = new Date(p.created_at).toISOString().split('T')[0];
+      if (!porDia[dia]) {
+        porDia[dia] = { fecha: dia, efectivo: 0, tarjeta: 0, digital: 0, total: 0, cantidad: 0 };
+      }
+      const monto = Number(p.monto);
+      if (p.metodo_pago === 'efectivo') porDia[dia].efectivo += monto;
+      else if (p.metodo_pago === 'tarjeta') porDia[dia].tarjeta += monto;
+      else porDia[dia].digital += monto;
+      porDia[dia].total += monto;
+      porDia[dia].cantidad += 1;
+    });
+
+    const resumenDiario = Object.values(porDia).sort((a, b) => b.fecha.localeCompare(a.fecha));
+
+    res.json({
+      ok: true,
+      resumen: {
+        total_pagos: pagos.length,
+        total_efectivo: totalEfectivo,
+        total_tarjeta: totalTarjeta,
+        total_digital: totalDigital,
+        total_general: totalEfectivo + totalTarjeta + totalDigital
+      },
+      resumen_diario: resumenDiario,
       data: pagos
     });
   } catch (error) {
