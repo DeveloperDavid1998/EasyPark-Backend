@@ -25,6 +25,7 @@ app.use('/api/vehiculos', require('./src/routes/vehiculos.routes'));
 app.use('/api/registros', require('./src/routes/registros.routes'));
 app.use('/api/pagos', require('./src/routes/pagos.routes'));
 app.use('/api/tarifas', require('./src/routes/tarifas.routes'));
+app.use('/api/abonados', require('./src/routes/abonados.routes'));
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`EasyPark API corriendo en http://localhost:${PORT}`);
