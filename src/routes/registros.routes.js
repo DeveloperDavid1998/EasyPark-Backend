@@ -12,13 +12,11 @@ router.post('/entrada', async (req, res) => {
       return res.status(400).json({ ok: false, message: 'Placa, tipo y operador_id son requeridos' });
     }
 
-    // Buscar o crear vehiculo
     let vehiculo = await prisma.vehiculos.findUnique({ where: { placa: placa.toUpperCase() } });
     if (!vehiculo) {
       vehiculo = await prisma.vehiculos.create({ data: { placa: placa.toUpperCase(), tipo } });
     }
 
-    // Verificar si ya esta estacionado
     const yaEstacionado = await prisma.registros.findFirst({
       where: { vehiculo_id: vehiculo.id, estado: 'activo' }
     });
@@ -26,7 +24,6 @@ router.post('/entrada', async (req, res) => {
       return res.status(400).json({ ok: false, message: 'Este vehiculo ya esta estacionado' });
     }
 
-    // Buscar espacio libre
     const espacio = await prisma.espacios.findFirst({
       where: { tipo_vehiculo: tipo, estado: 'libre' }
     });
@@ -37,9 +34,17 @@ router.post('/entrada', async (req, res) => {
     // Verificar si es abonado
     const abonado = await prisma.abonado_vehiculos.findFirst({
       where: { vehiculo_id: vehiculo.id, activo: true, fecha_fin: { gte: new Date() } }
-    });
+    }).catch(() => null);
 
-    // Crear registro y ocupar espacio en una transaccion
+    // Buscar tarifas para mostrar en el tiquete
+    const tarifaFraccion = await prisma.tarifas.findFirst({
+      where: { tipo_vehiculo: tipo, tipo_tarifa: 'fraccion', activa: true }
+    }).catch(() => null);
+
+    const tarifaPlena = await prisma.tarifas.findFirst({
+      where: { tipo_vehiculo: tipo, tipo_tarifa: 'plena', activa: true }
+    }).catch(() => null);
+
     const tiquete_codigo = generateCode('EPK');
 
     const [registro] = await prisma.$transaction([
@@ -65,7 +70,11 @@ router.post('/entrada', async (req, res) => {
         vehiculo: { placa: vehiculo.placa, tipo: vehiculo.tipo },
         espacio: { numero: espacio.numero, zona: espacio.zona },
         entrada: registro.fecha_entrada,
-        es_abonado: !!abonado
+        es_abonado: !!abonado,
+        tarifas: {
+          fraccion: tarifaFraccion ? Number(tarifaFraccion.valor) : null,
+          plena: tarifaPlena ? Number(tarifaPlena.valor) : null
+        }
       }
     });
   } catch (error) {
@@ -83,7 +92,6 @@ router.post('/salida', async (req, res) => {
       return res.status(400).json({ ok: false, message: 'Tiquete y operador_id son requeridos' });
     }
 
-    // Buscar registro activo
     const registro = await prisma.registros.findFirst({
       where: { tiquete_codigo, estado: 'activo' },
       include: { vehiculos: true, espacios: true }
@@ -93,28 +101,24 @@ router.post('/salida', async (req, res) => {
       return res.status(404).json({ ok: false, message: 'Tiquete no encontrado o ya fue procesado' });
     }
 
-    // Calcular tiempo
     const entrada = new Date(registro.fecha_entrada);
     const salida = new Date();
     const diffMs = salida - entrada;
     const diffMinutos = Math.ceil(diffMs / 60000);
     const diffHoras = Math.ceil(diffMinutos / 60);
 
-    // Verificar si es abonado
     const abonado = await prisma.abonado_vehiculos.findFirst({
       where: { vehiculo_id: registro.vehiculo_id, activo: true, fecha_fin: { gte: new Date() } }
-    });
+    }).catch(() => null);
 
     let monto = 0;
     let tarifa = null;
 
     if (!abonado) {
-      // Buscar tarifa por fraccion
       tarifa = await prisma.tarifas.findFirst({
         where: { tipo_vehiculo: registro.vehiculos.tipo, tipo_tarifa: 'fraccion', activa: true }
       });
 
-      // Buscar tarifa plena
       const tarifaPlena = await prisma.tarifas.findFirst({
         where: { tipo_vehiculo: registro.vehiculos.tipo, tipo_tarifa: 'plena', activa: true }
       });
@@ -123,7 +127,6 @@ router.post('/salida', async (req, res) => {
         monto = diffHoras * Number(tarifa.valor);
       }
 
-      // Si la tarifa plena es mas barata, usar esa
       if (tarifaPlena && Number(tarifaPlena.valor) < monto) {
         monto = Number(tarifaPlena.valor);
         tarifa = tarifaPlena;
